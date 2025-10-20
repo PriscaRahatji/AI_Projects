@@ -1,0 +1,512 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# TB Incidence Prediction for SDG 3.3\n",
+    "## Predicting if Target 3.3 will be reached by 2030\n",
+    "\n",
+    "**Objective:** Analyze TB incidence trends and predict whether the UN SDG 3.3 target (reduce TB incidence to below the target rate) will be achieved by 2030.\n",
+    "\n",
+    "**Data Source:** IHME GBD 2021 TB Incidence Data"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Import required libraries\n",
+    "import pandas as pd\n",
+    "import numpy as np\n",
+    "import matplotlib.pyplot as plt\n",
+    "import seaborn as sns\n",
+    "from sklearn.linear_model import LinearRegression\n",
+    "from sklearn.metrics import r2_score, mean_squared_error\n",
+    "import warnings\n",
+    "warnings.filterwarnings('ignore')\n",
+    "\n",
+    "# Set style for better visualizations\n",
+    "sns.set_style('whitegrid')\n",
+    "plt.rcParams['figure.figsize'] = (14, 8)\n",
+    "plt.rcParams['font.size'] = 11"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 1. Data Loading and Exploration"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Load the dataset\n",
+    "df = pd.read_csv('src/data/tb_data.csv')\n",
+    "\n",
+    "# Display basic information\n",
+    "print(\"Dataset shape:\", df.shape)\n",
+    "print(\"\\nColumn names:\")\n",
+    "print(df.columns.tolist())\n",
+    "print(\"\\nFirst few rows:\")\n",
+    "df.head()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Check for missing values\n",
+    "print(\"Missing values:\")\n",
+    "print(df.isnull().sum())\n",
+    "print(\"\\nData types:\")\n",
+    "print(df.dtypes)\n",
+    "print(\"\\nBasic statistics:\")\n",
+    "df.describe()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 2. Data Processing and Filtering"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Filter for age group 15-49 and incidence metric\n",
+    "df_filtered = df[(df['age_group'] == '15 to 49') & (df['metric'] == 'incidence')].copy()\n",
+    "\n",
+    "print(f\"Filtered dataset shape: {df_filtered.shape}\")\n",
+    "print(f\"\\nUnique years: {sorted(df_filtered['year_id'].unique())}\")\n",
+    "print(f\"Unique sexes: {df_filtered['Sex'].unique()}\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Aggregate data by year and sex\n",
+    "df_processed = df_filtered.groupby(['year_id', 'Sex']).agg({\n",
+    "    'mean': 'mean',\n",
+    "    'lower': 'mean',\n",
+    "    'upper': 'mean',\n",
+    "    'inc_target': 'first'\n",
+    "}).reset_index()\n",
+    "\n",
+    "# Pivot to have male and female as separate columns\n",
+    "df_pivot = df_processed.pivot(index='year_id', columns='Sex', values='mean').reset_index()\n",
+    "df_pivot.columns.name = None\n",
+    "df_pivot = df_pivot.rename(columns={'year_id': 'year', 'Male': 'male', 'Female': 'female'})\n",
+    "\n",
+    "# Add target column\n",
+    "df_pivot['target'] = df_filtered.groupby('year_id')['inc_target'].first().values\n",
+    "\n",
+    "# Calculate overall incidence (average of male and female)\n",
+    "df_pivot['overall'] = (df_pivot['male'] + df_pivot['female']) / 2\n",
+    "\n",
+    "print(\"Processed data:\")\n",
+    "df_pivot"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 3. Exploratory Data Analysis"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Visualize historical trends\n",
+    "fig, axes = plt.subplots(2, 2, figsize=(16, 12))\n",
+    "\n",
+    "# Plot 1: Overall trend with target\n",
+    "ax1 = axes[0, 0]\n",
+    "ax1.plot(df_pivot['year'], df_pivot['overall'], marker='o', linewidth=2, label='Overall Incidence', color='#3b82f6')\n",
+    "ax1.plot(df_pivot['year'], df_pivot['target'], marker='s', linewidth=2, label='SDG Target', color='#ef4444', linestyle='--')\n",
+    "ax1.set_xlabel('Year')\n",
+    "ax1.set_ylabel('TB Incidence Rate (per 100,000)')\n",
+    "ax1.set_title('TB Incidence vs SDG 3.3 Target (Age 15-49)', fontsize=14, fontweight='bold')\n",
+    "ax1.legend()\n",
+    "ax1.grid(True, alpha=0.3)\n",
+    "\n",
+    "# Plot 2: Gender comparison\n",
+    "ax2 = axes[0, 1]\n",
+    "ax2.plot(df_pivot['year'], df_pivot['male'], marker='o', linewidth=2, label='Male', color='#0ea5e9')\n",
+    "ax2.plot(df_pivot['year'], df_pivot['female'], marker='o', linewidth=2, label='Female', color='#ec4899')\n",
+    "ax2.set_xlabel('Year')\n",
+    "ax2.set_ylabel('TB Incidence Rate (per 100,000)')\n",
+    "ax2.set_title('TB Incidence by Gender', fontsize=14, fontweight='bold')\n",
+    "ax2.legend()\n",
+    "ax2.grid(True, alpha=0.3)\n",
+    "\n",
+    "# Plot 3: Year-over-year change\n",
+    "ax3 = axes[1, 0]\n",
+    "yoy_change = df_pivot['overall'].pct_change() * 100\n",
+    "colors = ['#10b981' if x < 0 else '#ef4444' for x in yoy_change]\n",
+    "ax3.bar(df_pivot['year'][1:], yoy_change[1:], color=colors[1:])\n",
+    "ax3.axhline(y=0, color='black', linestyle='-', linewidth=0.5)\n",
+    "ax3.set_xlabel('Year')\n",
+    "ax3.set_ylabel('% Change from Previous Year')\n",
+    "ax3.set_title('Year-over-Year Change in TB Incidence', fontsize=14, fontweight='bold')\n",
+    "ax3.grid(True, alpha=0.3, axis='y')\n",
+    "\n",
+    "# Plot 4: Gap to target\n",
+    "ax4 = axes[1, 1]\n",
+    "gap = df_pivot['overall'] - df_pivot['target']\n",
+    "colors = ['#ef4444' if x > 0 else '#10b981' for x in gap]\n",
+    "ax4.bar(df_pivot['year'], gap, color=colors)\n",
+    "ax4.axhline(y=0, color='black', linestyle='-', linewidth=0.5)\n",
+    "ax4.set_xlabel('Year')\n",
+    "ax4.set_ylabel('Gap (Incidence - Target)')\n",
+    "ax4.set_title('Gap Between Actual Incidence and SDG Target', fontsize=14, fontweight='bold')\n",
+    "ax4.grid(True, alpha=0.3, axis='y')\n",
+    "\n",
+    "plt.tight_layout()\n",
+    "plt.show()\n",
+    "\n",
+    "print(\"\\nKey Statistics:\")\n",
+    "print(f\"Latest year: {df_pivot['year'].max()}\")\n",
+    "print(f\"Latest incidence rate: {df_pivot['overall'].iloc[-1]:.2f} per 100,000\")\n",
+    "print(f\"Latest target rate: {df_pivot['target'].iloc[-1]:.2f} per 100,000\")\n",
+    "print(f\"Current gap: {gap.iloc[-1]:.2f} per 100,000\")\n",
+    "print(f\"Average annual reduction: {df_pivot['overall'].diff().mean():.2f} per 100,000\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 4. Machine Learning Model - Linear Regression"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Prepare data for ML model\n",
+    "X = df_pivot['year'].values.reshape(-1, 1)\n",
+    "y = df_pivot['overall'].values\n",
+    "\n",
+    "# Train linear regression model\n",
+    "model = LinearRegression()\n",
+    "model.fit(X, y)\n",
+    "\n",
+    "# Make predictions on training data\n",
+    "y_pred_train = model.predict(X)\n",
+    "\n",
+    "# Calculate model performance\n",
+    "r2 = r2_score(y, y_pred_train)\n",
+    "rmse = np.sqrt(mean_squared_error(y, y_pred_train))\n",
+    "\n",
+    "print(\"Model Performance:\")\n",
+    "print(f\"R² Score: {r2:.4f}\")\n",
+    "print(f\"RMSE: {rmse:.4f}\")\n",
+    "print(f\"\\nModel Coefficients:\")\n",
+    "print(f\"Slope: {model.coef_[0]:.4f} (change per year)\")\n",
+    "print(f\"Intercept: {model.intercept_:.4f}\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 5. Predictions for 2022-2030"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Generate predictions for future years\n",
+    "future_years = np.arange(2022, 2031).reshape(-1, 1)\n",
+    "predictions = model.predict(future_years)\n",
+    "\n",
+    "# Apply dampening factor for more realistic long-term predictions\n",
+    "last_actual_year = df_pivot['year'].max()\n",
+    "last_actual_value = df_pivot['overall'].iloc[-1]\n",
+    "dampening_factor = 0.95\n",
+    "\n",
+    "predictions_dampened = []\n",
+    "for i, (year, pred) in enumerate(zip(future_years.flatten(), predictions)):\n",
+    "    years_ahead = year - last_actual_year\n",
+    "    change = pred - last_actual_value\n",
+    "    dampened_change = change * (dampening_factor ** years_ahead)\n",
+    "    dampened_pred = last_actual_value + dampened_change\n",
+    "    predictions_dampened.append(dampened_pred)\n",
+    "\n",
+    "# Create predictions dataframe\n",
+    "df_predictions = pd.DataFrame({\n",
+    "    'year': future_years.flatten(),\n",
+    "    'predicted_linear': predictions,\n",
+    "    'predicted_dampened': predictions_dampened,\n",
+    "    'target': df_pivot['target'].iloc[-1]  # Assuming target stays constant\n",
+    "})\n",
+    "\n",
+    "print(\"Predictions for 2022-2030:\")\n",
+    "print(df_predictions)\n",
+    "\n",
+    "# Key prediction for 2030\n",
+    "pred_2030 = df_predictions[df_predictions['year'] == 2030]['predicted_dampened'].values[0]\n",
+    "target_2030 = df_predictions[df_predictions['year'] == 2030]['target'].values[0]\n",
+    "will_reach_target = pred_2030 <= target_2030\n",
+    "\n",
+    "print(f\"\\n2030 Prediction (Dampened): {pred_2030:.2f} per 100,000\")\n",
+    "print(f\"2030 Target: {target_2030:.2f} per 100,000\")\n",
+    "print(f\"Gap in 2030: {pred_2030 - target_2030:.2f} per 100,000\")\n",
+    "print(f\"\\nWill SDG 3.3 target be reached by 2030? {'YES ✓' if will_reach_target else 'NO ✗'}\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 6. Comprehensive Visualization of Predictions"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Create comprehensive prediction visualization\n",
+    "plt.figure(figsize=(16, 10))\n",
+    "\n",
+    "# Historical data\n",
+    "plt.plot(df_pivot['year'], df_pivot['overall'], \n",
+    "         marker='o', linewidth=3, markersize=8, \n",
+    "         label='Historical Data', color='#3b82f6')\n",
+    "\n",
+    "# Predictions\n",
+    "plt.plot(df_predictions['year'], df_predictions['predicted_dampened'], \n",
+    "         marker='s', linewidth=3, markersize=8, linestyle='--',\n",
+    "         label='Predicted (Dampened)', color='#8b5cf6')\n",
+    "\n",
+    "# Target line\n",
+    "all_years = np.concatenate([df_pivot['year'].values, df_predictions['year'].values])\n",
+    "target_line = [target_2030] * len(all_years)\n",
+    "plt.plot(all_years, target_line, \n",
+    "         linewidth=3, linestyle=':', \n",
+    "         label='SDG 3.3 Target', color='#ef4444')\n",
+    "\n",
+    "# Highlight 2030 prediction\n",
+    "plt.scatter([2030], [pred_2030], s=300, c='#8b5cf6', \n",
+    "            edgecolors='black', linewidths=2, zorder=5, \n",
+    "            label='2030 Prediction')\n",
+    "\n",
+    "# Add confidence interval (simplified)\n",
+    "confidence = rmse * 1.96  # 95% confidence interval\n",
+    "plt.fill_between(df_predictions['year'], \n",
+    "                 df_predictions['predicted_dampened'] - confidence,\n",
+    "                 df_predictions['predicted_dampened'] + confidence,\n",
+    "                 alpha=0.2, color='#8b5cf6', label='95% Confidence Interval')\n",
+    "\n",
+    "# Annotations\n",
+    "plt.annotate(f'2030 Prediction\\n{pred_2030:.1f} per 100k',\n",
+    "             xy=(2030, pred_2030), xytext=(2027, pred_2030 + 10),\n",
+    "             arrowprops=dict(arrowstyle='->', color='black', lw=2),\n",
+    "             fontsize=12, fontweight='bold',\n",
+    "             bbox=dict(boxstyle='round,pad=0.5', facecolor='yellow', alpha=0.7))\n",
+    "\n",
+    "plt.xlabel('Year', fontsize=14, fontweight='bold')\n",
+    "plt.ylabel('TB Incidence Rate (per 100,000)', fontsize=14, fontweight='bold')\n",
+    "plt.title('TB Incidence: Historical Data and Predictions for SDG 3.3 Target (Age 15-49)', \n",
+    "          fontsize=16, fontweight='bold', pad=20)\n",
+    "plt.legend(fontsize=12, loc='upper right')\n",
+    "plt.grid(True, alpha=0.3)\n",
+    "plt.tight_layout()\n",
+    "plt.show()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 7. Additional Analysis - Confidence Metrics"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Calculate prediction confidence\n",
+    "years_ahead = 2030 - last_actual_year\n",
+    "base_confidence = r2 * 100\n",
+    "time_penalty = dampening_factor ** years_ahead\n",
+    "confidence_score = max(50, min(95, base_confidence * time_penalty))\n",
+    "\n",
+    "# Calculate required annual reduction\n",
+    "current_rate = df_pivot['overall'].iloc[-1]\n",
+    "years_remaining = 2030 - last_actual_year\n",
+    "required_reduction = (current_rate - target_2030) / years_remaining\n",
+    "historical_reduction = -model.coef_[0]  # Negative because we want reduction\n",
+    "\n",
+    "print(\"Confidence Metrics:\")\n",
+    "print(f\"Model R² Score: {r2:.2%}\")\n",
+    "print(f\"Prediction Confidence for 2030: {confidence_score:.1f}%\")\n",
+    "print(f\"\\nReduction Analysis:\")\n",
+    "print(f\"Current rate (2021): {current_rate:.2f} per 100,000\")\n",
+    "print(f\"Target rate (2030): {target_2030:.2f} per 100,000\")\n",
+    "print(f\"Required annual reduction: {required_reduction:.2f} per 100,000/year\")\n",
+    "print(f\"Historical annual reduction: {historical_reduction:.2f} per 100,000/year\")\n",
+    "print(f\"\\nIs current trend sufficient? {'YES ✓' if historical_reduction >= required_reduction else 'NO ✗'}\")\n",
+    "print(f\"Additional effort needed: {max(0, required_reduction - historical_reduction):.2f} per 100,000/year\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 8. Summary and Recommendations"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Create summary report\n",
+    "summary = f\"\"\"\n",
+    "{'='*80}\n",
+    "TB INCIDENCE PREDICTION REPORT - SDG 3.3 TARGET ANALYSIS\n",
+    "{'='*80}\n",
+    "\n",
+    "OBJECTIVE:\n",
+    "Assess whether SDG Target 3.3 (reduce TB incidence) will be achieved by 2030\n",
+    "for the 15-49 age group.\n",
+    "\n",
+    "METHODOLOGY:\n",
+    "- Machine Learning Model: Linear Regression with Dampening Factor\n",
+    "- Training Data: Historical TB incidence (1990-2021)\n",
+    "- Model Performance: R² = {r2:.4f}, RMSE = {rmse:.2f}\n",
+    "\n",
+    "KEY FINDINGS:\n",
+    "- Current TB Incidence (2021): {current_rate:.2f} per 100,000\n",
+    "- Predicted Incidence (2030): {pred_2030:.2f} per 100,000\n",
+    "- SDG Target (2030): {target_2030:.2f} per 100,000\n",
+    "- Gap in 2030: {pred_2030 - target_2030:.2f} per 100,000\n",
+    "\n",
+    "TARGET STATUS: {'✓ LIKELY TO BE ACHIEVED' if will_reach_target else '✗ UNLIKELY TO BE ACHIEVED'}\n",
+    "Prediction Confidence: {confidence_score:.1f}%\n",
+    "\n",
+    "TREND ANALYSIS:\n",
+    "- Historical reduction rate: {historical_reduction:.2f} per 100,000/year\n",
+    "- Required reduction rate: {required_reduction:.2f} per 100,000/year\n",
+    "- Gap: {max(0, required_reduction - historical_reduction):.2f} per 100,000/year\n",
+    "\n",
+    "RECOMMENDATIONS:\n",
+    "{'1. Continue current interventions - trend is positive' if will_reach_target else '1. Accelerate TB prevention and treatment programs'}\n",
+    "2. Focus on high-risk populations (15-49 age group)\n",
+    "3. Improve early detection and diagnostic capabilities\n",
+    "4. Strengthen healthcare infrastructure in endemic regions\n",
+    "5. Monitor progress annually and adjust strategies as needed\n",
+    "\n",
+    "{'='*80}\n",
+    "\"\"\"\n",
+    "\n",
+    "print(summary)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 9. Export Results"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Combine historical and predicted data\n",
+    "df_combined = pd.concat([\n",
+    "    df_pivot[['year', 'overall', 'target']].rename(columns={'overall': 'incidence'}),\n",
+    "    df_predictions[['year', 'predicted_dampened', 'target']].rename(columns={'predicted_dampened': 'incidence'})\n",
+    "], ignore_index=True)\n",
+    "\n",
+    "# Export to CSV\n",
+    "df_combined.to_csv('tb_predictions_results.csv', index=False)\n",
+    "print(\"Results exported to 'tb_predictions_results.csv'\")\n",
+    "\n",
+    "# Export summary statistics\n",
+    "summary_stats = {\n",
+    "    'Metric': [\n",
+    "        'Current Rate (2021)',\n",
+    "        'Predicted Rate (2030)',\n",
+    "        'Target Rate (2030)',\n",
+    "        'Gap (2030)',\n",
+    "        'Target Achieved?',\n",
+    "        'Model R² Score',\n",
+    "        'Prediction Confidence',\n",
+    "        'Required Annual Reduction',\n",
+    "        'Historical Annual Reduction'\n",
+    "    ],\n",
+    "    'Value': [\n",
+    "        f\"{current_rate:.2f}\",\n",
+    "        f\"{pred_2030:.2f}\",\n",
+    "        f\"{target_2030:.2f}\",\n",
+    "        f\"{pred_2030 - target_2030:.2f}\",\n",
+    "        'Yes' if will_reach_target else 'No',\n",
+    "        f\"{r2:.4f}\",\n",
+    "        f\"{confidence_score:.1f}%\",\n",
+    "        f\"{required_reduction:.2f}\",\n",
+    "        f\"{historical_reduction:.2f}\"\n",
+    "    ]\n",
+    "}\n",
+    "df_summary = pd.DataFrame(summary_stats)\n",
+    "df_summary.to_csv('tb_summary_statistics.csv', index=False)\n",
+    "print(\"Summary statistics exported to 'tb_summary_statistics.csv'\")"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.8.0"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 4
+}
